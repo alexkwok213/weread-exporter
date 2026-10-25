@@ -5,6 +5,7 @@ import base64
 import ctypes as C
 from datetime import datetime, timezone
 import hashlib
+import fcntl
 from html.parser import HTMLParser
 from html.entities import name2codepoint
 import json
@@ -12,6 +13,7 @@ import posixpath
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -63,6 +65,13 @@ def decode_file(blob, account):
     size = 32 if len(password) >= 32 else 24 if len(password) >= 24 else 16
     key = (password * ((size + len(password) - 1) // len(password)))[:size]
     return aes_cbc(blob[32:], key)
+
+def write_image_cache(path, blob):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.', delete=False) as handle:
+        handle.write(blob)
+        temporary = Path(handle.name)
+    temporary.replace(path)
 
 def image_type(blob):
     if blob.startswith(b'\xff\xd8'):
@@ -230,8 +239,7 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
                 '30', clean], capture_output=True, check=True)
             blob = response.stdout
             image_type(blob)
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(blob)
+            write_image_cache(cache_path, blob)
         else:
             misses.append(url)
             return None
@@ -366,19 +374,9 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
     ET.SubElement(rootfiles, 'rootfile', {'full-path': 'OEBPS/content.opf', 'media-type': 'application/oebps-package+xml'})
 
     output.mkdir(parents=True, exist_ok=True)
-    safe_title = re.sub(r'[/:\\\x00-\x1f]', '_', metadata['title']).strip(' .') or book_id
-    filename = output / (safe_title + '.epub')
-    if filename.exists():
-        filename = output / (safe_title + '（' + book_id + '）.epub')
-    if filename.exists():
-        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        filename = output / (safe_title + '（' + book_id + '，' + stamp + '）.epub')
-        number = 2
-        while filename.exists():
-            filename = output / (safe_title + '（' + book_id + '，' + stamp + '-' + str(number) + '）.epub')
-            number += 1
-    temporary = output / ('.' + book_id + '.epub.tmp')
-    temporary.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix='.' + book_id + '.', suffix='.epub.tmp',
+                                     dir=output, delete=False) as handle:
+        temporary = Path(handle.name)
     with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
         archive.writestr('META-INF/container.xml', xml(container))
@@ -412,7 +410,20 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
                         raise ValueError('Missing stylesheet resource: ' + target)
     if any(hashlib.sha256(p.read_bytes()).hexdigest() != digest for p, digest in hashes.items()):
         raise ValueError('A source file changed during export')
-    temporary.replace(filename)
+    with (output / '.publish.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        safe_title = re.sub(r'[/:\\\x00-\x1f]', '_', metadata['title']).strip(' .') or book_id
+        filename = output / (safe_title + '.epub')
+        if filename.exists():
+            filename = output / (safe_title + '（' + book_id + '）.epub')
+        if filename.exists():
+            stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            filename = output / (safe_title + '（' + book_id + '，' + stamp + '）.epub')
+            number = 2
+            while filename.exists():
+                filename = output / (safe_title + '（' + book_id + '，' + stamp + '-' + str(number) + '）.epub')
+                number += 1
+        temporary.replace(filename)
     body_characters = 0
     for doc in docs.values():
         for node in doc.iter():

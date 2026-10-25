@@ -137,6 +137,13 @@ def annotate(items,output,state):
     return items
 
 def export_one(identity,output,statefile,cache,seed):
+    locks=statefile.parent/'locks';locks.mkdir(parents=True,exist_ok=True)
+    digest=hashlib.sha256(identity.encode()).hexdigest()
+    with (locks/(digest+'.lock')).open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        return _export_one(identity,output,statefile,cache,seed)
+
+def _export_one(identity,output,statefile,cache,seed):
     items=discover();item=next((i for i in items if i['id']==identity),None)
     if not item:raise ExportError('这本书已不在本机缓存中')
     if not item['ready']:raise ExportError(item['status'])
@@ -148,7 +155,7 @@ def export_one(identity,output,statefile,cache,seed):
             if folder.is_dir():
                 dest=cache/folder.name;dest.mkdir(parents=True,exist_ok=True)
                 for p in folder.iterdir():
-                    if p.is_file() and not (dest/p.name).exists():shutil.copyfile(p,dest/p.name)
+                    if p.is_file() and not (dest/p.name).exists():core.write_image_cache(dest/p.name,p.read_bytes())
     core.BOOKS={item['book_id']:item['metadata']}
     result=core.export_book(item['book_id'],Path(item['root']),output,cache,True)
     after=next((i for i in discover() if i['id']==identity),None)
@@ -156,9 +163,11 @@ def export_one(identity,output,statefile,cache,seed):
         Path(result['epub']).unlink()
         raise ExportError('下载内容发生变化，已取消本次导出，稍后将重试')
     result['fingerprint']=item['fingerprint'];result['exported_at']=time.time()
-    state[state_key(item,output)]=result
-    statefile.parent.mkdir(parents=True,exist_ok=True)
-    temp=statefile.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False,indent=2));temp.replace(statefile)
+    with (statefile.parent/'export.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        state=state_load(statefile)
+        state[state_key(item,output)]=result
+        temp=statefile.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False,indent=2));temp.replace(statefile)
     return {'skipped':False,'result':result}
 
 def main():
@@ -173,10 +182,7 @@ def main():
     try:
         if args.action=='scan':response={'books':annotate(discover(),output,state_load(args.state))}
         else:
-            args.state.parent.mkdir(parents=True,exist_ok=True)
-            with (args.state.parent/'export.lock').open('a') as lock:
-                fcntl.flock(lock,fcntl.LOCK_EX)
-                response=export_one(args.id,output,args.state,args.cache,args.seed)
+            response=export_one(args.id,output,args.state,args.cache,args.seed)
         print(json.dumps({'ok':True,**response},ensure_ascii=False))
     except PermissionError:
         print(json.dumps({'ok':False,'kind':'permission','error':'需要允许“微信读书导出助手”读取微信读书缓存。请在系统设置 → 隐私与安全性 → 完全磁盘访问权限中添加此应用，然后退出并重新打开。'},ensure_ascii=False))

@@ -76,7 +76,10 @@ final class ExportModel: ObservableObject {
     @Published var output: String
     @Published var lastChecked = ""
     @Published var failures: [String: BookFailure] = [:]
-    @Published var currentBookID: String?
+    @Published var exportingBookIDs: Set<String> = []
+    private var activeRequests = 0
+    private let maxConcurrentExports = 3
+    private var batchStopped = false
     @Published var batchTotal = 0
     @Published var batchCompleted = 0
     @Published var batchRunning = false
@@ -138,7 +141,7 @@ final class ExportModel: ObservableObject {
         }
     }
     func perform(action: String, identity: String? = nil, completion: @escaping (WorkerResponse) -> Void) {
-        busy = true
+        activeRequests += 1; busy = true
         #if DEBUG
         if fixtureMode {
             let response = fixtureResponse?(action, identity) ?? (action == "scan"
@@ -146,7 +149,7 @@ final class ExportModel: ObservableObject {
                 : (identity == "fixture:3"
                     ? WorkerResponse(ok: false, error: "测试：配图下载失败", kind: "network")
                     : WorkerResponse(ok: true, result: ExportResult(title: books.first { $0.id == identity }?.title ?? "测试书籍", epub: "/tmp/fixture.epub"))))
-            DispatchQueue.main.async { self.busy = false; completion(response) }
+            DispatchQueue.main.async { self.activeRequests -= 1; self.busy = self.activeRequests > 0; completion(response) }
             return
         }
         #endif
@@ -178,10 +181,11 @@ final class ExportModel: ObservableObject {
             } catch {
                 response = WorkerResponse(ok: false, error: error.localizedDescription, kind: "runtime")
             }
-            DispatchQueue.main.async { self.busy = false; completion(response) }
+            DispatchQueue.main.async { self.activeRequests -= 1; self.busy = self.activeRequests > 0; completion(response) }
         }
     }
     func handleError(_ response: WorkerResponse) {
+        if permissionNeeded && response.kind != "permission" { return }
         error = response.error ?? "操作失败，请稍后重试"
         permissionNeeded = response.kind == "permission"
         message = "需要处理后重试"
@@ -208,12 +212,13 @@ final class ExportModel: ObservableObject {
         }
     }
     func export(_ book: Book) {
-        guard !busy else { return }
-        currentBookID = book.id
+        guard book.ready && !book.exported && !exportingBookIDs.contains(book.id) else { return }
+        guard batchRunning ? exportingBookIDs.count < maxConcurrentExports : !busy else { return }
+        exportingBookIDs.insert(book.id)
         error = ""; message = "正在导出《\(book.title)》并整理配图…"
         perform(action: "export", identity: book.id) { [weak self] response in
             guard let self else { return }
-            self.currentBookID = nil
+            self.exportingBookIDs.remove(book.id)
             if response.ok, let result = response.result {
                 self.message = "已导出《\(result.title)》"
                 self.retryAfter[book.id] = nil
@@ -223,38 +228,43 @@ final class ExportModel: ObservableObject {
                 }
             } else {
                 self.handleError(response)
-                self.failures[book.id] = BookFailure(fingerprint: book.fingerprint, message: self.error)
+                self.failures[book.id] = BookFailure(fingerprint: book.fingerprint, message: response.error ?? self.error)
                 self.retryAfter[book.id] = Date().addingTimeInterval(120)
                 if self.batchRunning { self.batchFailed += 1 }
             }
             self.saveFailures()
             if self.batchRunning {
                 self.batchCompleted += 1
-                if self.permissionNeeded { self.queue.removeAll(); self.batchRunning = false }
-                else { self.advanceQueue() }
+                if self.permissionNeeded { self.queue.removeAll() }
+                self.advanceQueue()
             }
         }
     }
     func exportBatch(_ candidates: [Book]) {
         guard !busy && !batchRunning else { return }
-        queue = candidates.filter { $0.ready && !$0.exported }
+        var seen: Set<String> = []
+        queue = candidates.filter { $0.ready && !$0.exported && seen.insert($0.id).inserted }
         guard !queue.isEmpty else { return }
-        batchTotal = queue.count; batchCompleted = 0; batchFailed = 0; batchRunning = true
+        batchTotal = queue.count; batchCompleted = 0; batchFailed = 0; batchStopped = false; batchRunning = true
         advanceQueue()
     }
     func advanceQueue() {
         guard batchRunning else { return }
-        guard !queue.isEmpty else {
-            batchRunning = false
-            message = "批量完成：成功 \(batchCompleted - batchFailed) 本，失败 \(batchFailed) 本"
-            error = batchFailed == 0 ? "" : "\(batchFailed) 本导出失败，请到“导出失败”分类查看并重试。"
-            return
+        while !queue.isEmpty && !batchStopped && !permissionNeeded && exportingBookIDs.count < maxConcurrentExports {
+            export(queue.removeFirst())
         }
-        export(queue.removeFirst())
+        guard exportingBookIDs.isEmpty else { return }
+        batchRunning = false
+        if permissionNeeded { return }
+        message = batchStopped
+            ? "已停止排队，已完成 \(batchCompleted) 本"
+            : "批量完成：成功 \(batchCompleted - batchFailed) 本，失败 \(batchFailed) 本"
+        error = batchFailed == 0 ? "" : "\(batchFailed) 本导出失败，请到“导出失败”分类查看并重试。"
     }
     func stopBatch() {
-        queue.removeAll(); batchRunning = false
-        message = "已停止排队，当前书籍会继续完成"
+        queue.removeAll(); batchStopped = true
+        message = "已停止排队，正在导出的书籍会继续完成"
+        advanceQueue()
     }
     func chooseOutput() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
@@ -290,7 +300,7 @@ struct ContentView: View {
         model.books.filter { category.contains($0, failed: model.failedIDs) }.count
     }
     func status(_ book: Book) -> String {
-        if model.currentBookID == book.id { return "正在导出…" }
+        if model.exportingBookIDs.contains(book.id) { return "正在导出…" }
         if book.exported { return "已导出" }
         if model.failures[book.id] != nil { return "导出失败" }
         return book.ready ? "待导出" : "未就绪"
@@ -335,7 +345,7 @@ struct ContentView: View {
                 }.labelsHidden().frame(width: 140)
                 Button("导出当前列表（\(candidates.count)）") { model.exportBatch(candidates) }
                     .disabled(candidates.isEmpty || model.busy || model.batchRunning)
-                    .help("依次导出当前分类和搜索结果中已下载齐全、尚未导出的书籍。")
+                    .help("最多同时导出 3 本当前列表中已下载齐全、尚未导出的书籍。")
             }
             HStack {
                 Text("显示 \(visibleBooks.count) / \(model.books.count) 本").font(.caption).foregroundStyle(.secondary)
@@ -396,7 +406,7 @@ struct ContentView: View {
             if model.batchRunning {
                 HStack {
                     ProgressView(value: Double(model.batchCompleted), total: Double(model.batchTotal)).frame(width: 180)
-                    Text("批量导出 \(model.batchCompleted)/\(model.batchTotal)").font(.caption)
+                    Text("已完成 \(model.batchCompleted)/\(model.batchTotal) · 同时导出 \(model.exportingBookIDs.count) 本").font(.caption)
                     Spacer()
                     Button("停止排队") { model.stopBatch() }.controlSize(.small)
                 }

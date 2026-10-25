@@ -20,6 +20,9 @@ class RootLayoutTest(unittest.TestCase):
     def test_html_chapters_are_discovered_and_exported(self):
         self.check_export('Text/coverpage.html', 'Styles/style.css')
 
+    def test_translation_styles_are_packaged_and_tracked(self):
+        self.check_export('Text/coverpage.html', 'wereadstyle/wrtranslation.css')
+
     def check_export(self, chapter_path, style_path):
         with tempfile.TemporaryDirectory() as temp:
             tmp = Path(temp)

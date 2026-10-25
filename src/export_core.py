@@ -199,7 +199,8 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
             title.text = next(ch['title'] for ch in metadata['chapters']
                               if relative in [p.split('#', 1)[0] for p in ch['paths']])
         docs[relative] = doc
-    for path in sorted(list((book / 'Styles').glob('*.css')) + list((book / 'css').glob('*.css'))):
+    for path in sorted(list((book / 'Styles').glob('*.css')) + list((book / 'css').glob('*.css'))
+                       + list((book / 'wereadstyle').glob('*.css'))):
         plain = decode_file(read_source(path), account)
         plain.decode('utf-8')
         name = str(path.relative_to(book))

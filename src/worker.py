@@ -112,7 +112,7 @@ def discover():
                 if not ch or any(not c['paths'] for c in ch) or (row[5] and len(ch)<row[5]):raise ExportError('等待完整目录下载')
                 if expected!=actual:raise ExportError('正文下载未完成（'+str(item['downloaded'])+'/'+str(len(expected))+'）')
                 h=hashlib.sha256(json.dumps(metadata,ensure_ascii=False,sort_keys=True).encode())
-                for p in sorted(source_files+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'Images').glob('*'))):
+                for p in sorted(source_files+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'wereadstyle').glob('*.css'))+list((folder/'Images').glob('*'))):
                     if p.is_file():
                         stat=p.stat();h.update(str(p.relative_to(folder)).encode());h.update(str((stat.st_size,stat.st_mtime_ns)).encode())
                         if not stat.st_size:raise ExportError('正在下载正文文件')

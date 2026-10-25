@@ -9,6 +9,11 @@ class NonbreakingSpaceTest(unittest.TestCase):
         self.assertEqual(''.join(doc.itertext()), 'A\u00a0B & C&nbsp;')
         self.assertEqual(count, 1)
 
+    def test_html_named_entities_preserve_spacing_symbols_and_markup_text(self):
+        doc, count = core.parse_xhtml(b'<html><p>&ensp;A&emsp;B&thinsp;&copy;&mdash;&lt;tag&gt;&amp;</p><p><![CDATA[&ensp;]]></p></html>')
+        self.assertEqual(''.join(doc.itertext()), '\u2002A\u2003B\u2009\u00a9\u2014<tag>&&ensp;')
+        self.assertEqual(count, 0)
+
     def test_unknown_entities_are_still_rejected(self):
         with self.assertRaises(ET.ParseError):
             core.parse_xhtml(b'<html><p>&unknown;</p></html>')

@@ -6,6 +6,7 @@ import ctypes as C
 from datetime import datetime, timezone
 import hashlib
 from html.parser import HTMLParser
+from html.entities import name2codepoint
 import json
 import posixpath
 from pathlib import Path, PurePosixPath
@@ -78,11 +79,12 @@ def xml(blob):
     return ET.tostring(blob, encoding='utf-8', xml_declaration=True)
 
 def parse_xhtml(blob):
-    """Normalize XHTML nonbreaking spaces and identical repeated data-* attributes."""
+    """Normalize XHTML named entities and identical repeated data-* attributes."""
     text = blob.decode('utf-8')
-    # XHTML's named nonbreaking space is not built into the XML parser.
-    text = re.sub(r'<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|&nbsp;',
-                  lambda match: '&#160;' if match[0] == '&nbsp;' else match[0], text)
+    # XHTML named entities need numeric equivalents in a standalone XML parser.
+    text = re.sub(r'<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|&([A-Za-z][A-Za-z0-9]*);',
+                  lambda match: '&#' + str(name2codepoint[match[1]]) + ';'
+                  if match[1] in name2codepoint else match[0], text)
     try:
         return ET.fromstring(text), 0
     except ET.ParseError as original_error:

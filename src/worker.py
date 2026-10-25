@@ -1,5 +1,6 @@
 """Local WeRead cache discovery and export. No account credentials or AI."""
 import argparse
+from contextlib import closing
 import fcntl
 import hashlib
 import json
@@ -57,10 +58,12 @@ def snapshot_query(account):
             after=[(p.stat().st_size,p.stat().st_mtime_ns) if p.exists() else None for p in tracked]
             if before==after:break
         else:raise ExportError('微信读书正在更新目录，请稍后重试')
-        with sqlite3.connect(target) as db:
+        with closing(sqlite3.connect(target)) as db:
             db.execute('pragma query_only=on')
             books=db.execute('select bookId,title,author,isbn,publisher,chapterSize,format from WRBook').fetchall()
-            chapters=db.execute('select bookId,chapterIdx,title,indentLevel,relativePath,relativePaths from WRChapter order by chapterIdx').fetchall()
+            columns={row[1] for row in db.execute('pragma table_info(WRChapter)')}
+            uid='chapterUid' if 'chapterUid' in columns else 'NULL'
+            chapters=db.execute('select bookId,chapterIdx,title,indentLevel,relativePath,relativePaths,'+uid+' from WRChapter order by chapterIdx').fetchall()
         return books,chapters
 
 def discover():
@@ -72,30 +75,44 @@ def discover():
         bookdirs={p.name:p for p in (account/'Books').iterdir() if p.is_dir() and p.name.isdigit()}
         if not bookdirs:continue
         books,allchapters=snapshot_query(account.name)
-        chapters={}
-        for bid,index,title,level,fallback,blob in allchapters:
-            if bid in bookdirs:
-                try:paths=read_paths(blob,fallback)
-                except Exception:paths=[]
-                chapters.setdefault(bid,[]).append({'index':index,'title':title or '未命名章节','level':max(1,level or 1),'paths':paths})
         catalog={row[0]:row for row in books}
+        chapters={}
+        for bid,index,title,level,fallback,blob,uid in allchapters:
+            if bid in bookdirs:
+                is_txt=bid in catalog and catalog[bid][6]=='txt'
+                source=None
+                if is_txt:
+                    paths=['Text/chapter-'+str(index)+'.xhtml'] if isinstance(uid,int) and uid>=0 else []
+                    if paths:source=bid+'_'+str(uid)+'_o'
+                else:
+                    try:paths=read_paths(blob,fallback)
+                    except Exception:paths=[]
+                chapter={'index':index,'title':title or '未命名章节','level':max(1,level or 1),'paths':paths}
+                if source:chapter['source']=source
+                chapters.setdefault(bid,[]).append(chapter)
         for bid,folder in sorted(bookdirs.items()):
             row=catalog.get(bid)
             title=row[1] if row else '书籍 '+bid
             item={'id':account.name+':'+bid,'book_id':bid,'account':account.name,'title':title,'author':row[2] or '' if row else '', 'root':str(account/'Books'),'ready':False,'status':'等待目录下载','downloaded':0,'expected':0,'fingerprint':''}
             try:
                 if not row:raise ExportError('等待目录下载')
-                if row[6]!='epub':raise ExportError('暂不支持此书格式：'+str(row[6]))
+                if row[6] not in ('epub','txt'):raise ExportError('暂不支持此书格式：'+str(row[6]))
                 ch=chapters.get(bid,[])
                 metadata={'title':title,'author':row[2] or '', 'isbn':row[3] or '', 'publisher':row[4] or '', 'chapters':ch}
+                if row[6]=='txt':metadata['format']='txt'
                 item['metadata']=metadata
                 expected={p.split('#',1)[0] for c in ch for p in c['paths']}
-                actual=core.chapter_files(folder)
+                if row[6]=='txt':
+                    actual={c['paths'][0] for c in ch if c['paths'] and (folder/c['source']).is_file()}
+                    source_files=[folder/c['source'] for c in ch if c.get('source')]
+                else:
+                    actual=core.chapter_files(folder)
+                    source_files=[folder/x for x in expected]
                 item['downloaded']=len(actual & expected);item['expected']=len(expected)
                 if not ch or any(not c['paths'] for c in ch) or (row[5] and len(ch)<row[5]):raise ExportError('等待完整目录下载')
                 if expected!=actual:raise ExportError('正文下载未完成（'+str(item['downloaded'])+'/'+str(len(expected))+'）')
                 h=hashlib.sha256(json.dumps(metadata,ensure_ascii=False,sort_keys=True).encode())
-                for p in sorted([folder/x for x in expected]+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'Images').glob('*'))):
+                for p in sorted(source_files+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'Images').glob('*'))):
                     if p.is_file():
                         stat=p.stat();h.update(str(p.relative_to(folder)).encode());h.update(str((stat.st_size,stat.st_mtime_ns)).encode())
                         if not stat.st_size:raise ExportError('正在下载正文文件')

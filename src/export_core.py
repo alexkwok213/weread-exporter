@@ -164,13 +164,33 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
 
     expected = [p for ch in metadata['chapters'] for p in ch['paths']]
     expected_files = {urllib.parse.unquote(p.split('#', 1)[0]) for p in expected}
-    actual = chapter_files(book)
+    is_txt = metadata.get('format') == 'txt'
+    actual = expected_files if is_txt else chapter_files(book)
     if expected_files != actual:
         raise ValueError('Chapter metadata and cache file set do not match')
+    txt_chapters = {ch['paths'][0]: ch for ch in metadata['chapters']} if is_txt else {}
 
     for relative in sorted(actual):
-        plain = decode_file(read_source(book / relative), account)
-        doc, normalized = parse_xhtml(plain)
+        if is_txt:
+            chapter = txt_chapters[relative]
+            source = chapter['source']
+            if not re.fullmatch(re.escape(book_id) + r'_\d+_o', source):
+                raise ValueError('Invalid TXT chapter source')
+            text = decode_file(read_source(book / source), account).decode('utf-8-sig')
+            if not text.strip():
+                raise ValueError('Empty TXT chapter: ' + source)
+            doc = ET.Element('{' + XHTML + '}html', {'lang': 'zh-CN'})
+            head = ET.SubElement(doc, '{' + XHTML + '}head')
+            ET.SubElement(head, '{' + XHTML + '}title').text = chapter['title']
+            body = ET.SubElement(doc, '{' + XHTML + '}body')
+            ET.SubElement(body, '{' + XHTML + '}h1').text = chapter['title']
+            ET.SubElement(body, '{' + XHTML + '}pre', {
+                'style': 'white-space: pre-wrap; font-family: inherit;'
+            }).text = text.replace('\r\n', '\n').replace('\r', '\n')
+            normalized = 0
+        else:
+            plain = decode_file(read_source(book / relative), account)
+            doc, normalized = parse_xhtml(plain)
         normalized_attributes += normalized
         if doc.tag != '{' + XHTML + '}html':
             raise ValueError('Invalid XHTML document: ' + relative)

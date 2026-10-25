@@ -3,7 +3,7 @@
 
 # 微信读书导出助手
 
-把 Mac 上已下载的微信读书 EPUB 缓存，整理为包含正文、目录和配图的本地 EPUB。
+把 Mac 上已下载的微信读书 EPUB / TXT 缓存，整理为包含正文、目录和配图的本地 EPUB。
 
 </div>
 
@@ -13,6 +13,7 @@
 
 - 自动发现本机缓存，显示下载是否完整、导出结果和失败原因。
 - 按书名或作者搜索、按状态筛选，单本或批量导出。
+- TXT 缓存按目录中的章节 UID 读取，按章节顺序转换为 EPUB，保留正文空格与段落换行。
 - 可选自动导出：新安装默认开启，每 15 秒检查一次稳定且完整的缓存，将所有符合条件的书排队连续导出；单本失败后继续处理其余书籍，失败项至少等待 120 秒再重试。
 - 保留正文和目录，嵌入配图，并在保存前验证 ZIP、XML 和本地资源引用。
 - 支持 `Text/` 或书籍根目录中的 `.xhtml`、`.html` 正文，以及 `Styles/`、`css/` 样式。
@@ -20,7 +21,7 @@
 
 ## 先用命令行试一下
 
-要求 macOS、Python 3.10+，以及已在本机下载书籍的微信读书应用。当前实测环境为 Apple Silicon；Windows、网页微信读书和 PDF 书籍不在支持范围内。
+要求 macOS、Python 3.10+，以及已在本机下载 EPUB 或 TXT 书籍的微信读书应用。当前实测环境为 Apple Silicon；Windows、网页微信读书和 PDF 书籍不在支持范围内。
 
 ```bash
 git clone https://github.com/alexkwok213/weread-exporter.git
@@ -87,7 +88,7 @@ python3 scripts/build.py --python-runtime /path/to/standalone/python
 python3 scripts/test.py
 ```
 
-测试使用合成正文和小图片，覆盖根目录与 `.html` 布局、图片网址占位、空格实体、重复属性、路径限制，以及 Swift 列表筛选、批量导出、取消和权限错误处理；不需要真实书库。
+测试使用合成正文和小图片，覆盖 TXT 章节映射、缺章与损坏缓存、根目录与 `.html` 布局、图片网址占位、空格实体、重复属性、路径限制，以及 Swift 列表筛选、批量导出、取消和权限错误处理；不需要真实书库。
 
 ```text
 src/        SwiftUI 界面、Python 扫描与导出核心

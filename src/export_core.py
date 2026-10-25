@@ -154,6 +154,11 @@ def chapter_files(book):
             for path in folder.glob('*')
             if path.is_file() and path.suffix in ('.xhtml', '.html')}
 
+def image_files(book):
+    return [path for folder in book.iterdir()
+            if folder.is_dir() and folder.name in ('Images', 'images')
+            for path in folder.iterdir() if path.is_file()]
+
 def export_book(book_id, root, output, cache, fetch_missing=False):
     metadata = BOOKS[book_id]
     book = root / book_id
@@ -249,11 +254,11 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
         remote_images[url] = name
         return name
 
-    for path in sorted((book / 'Images').glob('*')):
+    for path in sorted(image_files(book)):
         if not path.is_file():
             continue
         plain = decode_file(read_source(path), account)
-        name = 'Images/' + path.name
+        name = str(path.relative_to(book))
         # Some cache entries contain a CDN URL instead of image bytes.
         if plain.startswith(b'https://'):
             resolved = resolve_image(plain.decode('utf-8').strip(), name)
@@ -280,6 +285,11 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
     # CSS already falls back to list-style-type when a marker image is absent.
     # Make that fallback explicit so missing decoration cannot block the book.
     normalized_missing_list_images = 0
+    normalized_unused_css_rules = 0
+    used_classes = {value for doc in docs.values() for node in doc.iter()
+                    for value in node.get('class', '').split()}
+    has_scripts = any(node.tag.rsplit('}', 1)[-1] == 'script'
+                      for doc in docs.values() for node in doc.iter())
     for stylesheet_name in list(resources):
         if not stylesheet_name.endswith('.css'):
             continue
@@ -299,6 +309,27 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
         css = resources[stylesheet_name].decode('utf-8')
         css = re.sub(r"""/\*[\s\S]*?\*/|(?P<property>(?<![\w-])list-style-image\s*:\s*)url\(\s*["']?(?P<link>[^)"']+?)["']?\s*\)""",
                      list_marker_fallback, css, flags=re.IGNORECASE)
+        # Mask comments and quoted strings while preserving source offsets.
+        masked = re.sub(r"""/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""",
+                        lambda match: ' ' * len(match[0]), css)
+        removals = []
+        if not has_scripts:
+            for rule in re.finditer(r'(?P<selector>[^{}]+)\{(?P<declarations>[^{}]*)\}', masked):
+                selector = re.fullmatch(r'\s*\.([A-Za-z_][\w-]*)\s*', rule.group('selector'))
+                if selector is None or selector[1] in used_classes:
+                    continue
+                declarations = css[rule.start('declarations'):rule.end('declarations')]
+                links = re.findall(r"""url\(["']?([^\)"']+)""", declarations)
+                for link in links:
+                    parsed = urllib.parse.urlsplit(link.strip())
+                    target = posixpath.normpath(posixpath.join(posixpath.dirname(stylesheet_name),
+                                                               urllib.parse.unquote(parsed.path)))
+                    if parsed.path and not parsed.scheme and not parsed.netloc and target not in resources:
+                        removals.append((rule.start(), rule.end()))
+                        break
+        normalized_unused_css_rules += len(removals)
+        for start, end in reversed(removals):
+            css = css[:start] + css[end:]
         resources[stylesheet_name] = css.encode('utf-8')
 
     nav = ET.Element('{' + XHTML + '}html', {'lang': 'zh-CN'})
@@ -436,4 +467,5 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
             'missing_images': 0, 'source_files_verified_unchanged': len(hashes),
             'normalized_duplicate_attributes': normalized_attributes,
             'normalized_missing_list_images': normalized_missing_list_images,
+            'normalized_unused_css_rules': normalized_unused_css_rules,
             'epub_sha256': hashlib.sha256(filename.read_bytes()).hexdigest()}

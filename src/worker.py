@@ -112,7 +112,7 @@ def discover():
                 if not ch or any(not c['paths'] for c in ch) or (row[5] and len(ch)<row[5]):raise ExportError('等待完整目录下载')
                 if expected!=actual:raise ExportError('正文下载未完成（'+str(item['downloaded'])+'/'+str(len(expected))+'）')
                 h=hashlib.sha256(json.dumps(metadata,ensure_ascii=False,sort_keys=True).encode())
-                for p in sorted(source_files+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'wereadstyle').glob('*.css'))+list((folder/'Images').glob('*'))):
+                for p in sorted(source_files+list((folder/'Styles').glob('*.css'))+list((folder/'css').glob('*.css'))+list((folder/'wereadstyle').glob('*.css'))+core.image_files(folder)):
                     if p.is_file():
                         stat=p.stat();h.update(str(p.relative_to(folder)).encode());h.update(str((stat.st_size,stat.st_mtime_ns)).encode())
                         if not stat.st_size:raise ExportError('正在下载正文文件')
@@ -129,11 +129,28 @@ def state_key(item,output):return item['id']+'|'+str(output)
 
 def annotate(items,output,state):
     for item in items:
+        item['source_cached']=True
         saved=state.get(state_key(item,output),{})
         path=Path(saved.get('epub','/nonexistent-weread-export'))
         item['exported']=item['fingerprint']==saved.get('fingerprint') and path.is_file()
         item['epub']=str(path) if item['exported'] else ''
         if item['exported']:item['status']='已导出'
+    return items
+
+def scan_books(output,state):
+    items=annotate(list(discover()),output,state)
+    current={item['id'] for item in items}
+    for key,saved in state.items():
+        identity,separator,destination=key.partition('|')
+        path=Path(saved.get('epub','/nonexistent-weread-export'))
+        if not separator or destination!=str(output) or identity in current or not path.is_file():
+            continue
+        items.append({'id':identity,'book_id':saved.get('book_id',identity.split(':')[-1]),
+            'title':saved['title'],'author':saved.get('author',''),'ready':False,
+            'status':'原缓存已移除，EPUB 已保留','downloaded':0,
+            'expected':saved.get('cached_xhtml_files',0),'fingerprint':saved.get('fingerprint',''),
+            'exported':True,'epub':str(path),'source_cached':False})
+        current.add(identity)
     return items
 
 def export_one(identity,output,statefile,cache,seed):
@@ -180,7 +197,7 @@ def main():
     args=parser.parse_args()
     output=args.output.resolve()
     try:
-        if args.action=='scan':response={'books':annotate(discover(),output,state_load(args.state))}
+        if args.action=='scan':response={'books':scan_books(output,state_load(args.state))}
         else:
             response=export_one(args.id,output,args.state,args.cache,args.seed)
         print(json.dumps({'ok':True,**response},ensure_ascii=False))

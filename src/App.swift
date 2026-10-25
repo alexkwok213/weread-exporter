@@ -12,6 +12,7 @@ struct Book: Identifiable, Decodable {
     var fingerprint: String
     var exported: Bool
     var epub: String
+    var source_cached: Bool? = nil
 }
 struct WorkerResponse: Decodable {
     var ok: Bool
@@ -214,7 +215,7 @@ final class ExportModel: ObservableObject {
             if self.permissionNeeded { self.error = "" }
             self.permissionNeeded = false
             self.lastChecked = Date().formatted(date: .omitted, time: .standard)
-            self.message = self.books.isEmpty ? "尚未发现本机下载的电子书" : "已识别 \(self.books.count) 本本机缓存的书"
+            self.message = self.books.isEmpty ? "尚未发现本机下载的电子书" : "已识别 \(self.books.count) 本书（含历史导出）"
             let stable = self.books.filter { book in
                 book.ready && !book.exported && self.previous[book.id] == book.fingerprint && (self.retryAfter[book.id] ?? .distantPast) <= Date()
             }
@@ -398,7 +399,11 @@ struct ContentView: View {
                     TableColumn("状态") { book in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(status(book)).foregroundStyle(color(book))
-                            Text("\(book.downloaded)/\(book.expected) 个正文文件").font(.caption2).foregroundStyle(.secondary)
+                            if book.source_cached == false {
+                                Text("缓存已移除 · EPUB 已保留").font(.caption2).foregroundStyle(.secondary)
+                            } else {
+                                Text("\(book.downloaded)/\(book.expected) 个正文文件").font(.caption2).foregroundStyle(.secondary)
+                            }
                         }.padding(.vertical, 3)
                             .help(model.failures[book.id]?.message ?? book.status)
                     }.width(140)

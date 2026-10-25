@@ -78,7 +78,15 @@ final class ExportModel: ObservableObject {
     @Published var failures: [String: BookFailure] = [:]
     @Published var exportingBookIDs: Set<String> = []
     private var activeRequests = 0
-    private let maxConcurrentExports = 3
+    private let concurrencyPreferences: UserDefaults
+    @Published var maxConcurrentExports: Int {
+        didSet {
+            let limit = min(8, max(1, maxConcurrentExports))
+            if maxConcurrentExports != limit { maxConcurrentExports = limit }
+            concurrencyPreferences.set(limit, forKey: "maxConcurrentExports")
+            if batchRunning { advanceQueue() }
+        }
+    }
     private var batchStopped = false
     @Published var batchTotal = 0
     @Published var batchCompleted = 0
@@ -92,7 +100,10 @@ final class ExportModel: ObservableObject {
     private var timer: Timer?
     private var started = false
 
-    init() {
+    init(concurrencyPreferences: UserDefaults = .standard) {
+        self.concurrencyPreferences = concurrencyPreferences
+        let savedLimit = concurrencyPreferences.object(forKey: "maxConcurrentExports") as? Int ?? 3
+        maxConcurrentExports = min(8, max(1, savedLimit))
         auto = UserDefaults.standard.object(forKey: "autoExport") as? Bool ?? true
         output = UserDefaults.standard.string(forKey: "outputDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/微信读书导出").path
         loadFailures()
@@ -319,6 +330,12 @@ struct ContentView: View {
                     Text("共 \(model.books.count) 本 · 已导出 \(count(.exported)) 本").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Picker("同时导出", selection: $model.maxConcurrentExports) {
+                    ForEach(1...8, id: \.self) { count in
+                        Text("\(count) 本").tag(count)
+                    }
+                }.fixedSize()
+                    .help("调整后立即用于后续任务，正在导出的书籍不会中断。")
                 Toggle("自动导出", isOn: $model.auto).toggleStyle(.switch).fixedSize()
                     .help("应用打开时，每 15 秒检查新下载；内容齐全并稳定后自动导出。")
                 Button("刷新书籍") { model.refresh() }.disabled(model.busy || model.batchRunning)
@@ -345,7 +362,7 @@ struct ContentView: View {
                 }.labelsHidden().frame(width: 140)
                 Button("导出当前列表（\(candidates.count)）") { model.exportBatch(candidates) }
                     .disabled(candidates.isEmpty || model.busy || model.batchRunning)
-                    .help("最多同时导出 3 本当前列表中已下载齐全、尚未导出的书籍。")
+                    .help("最多同时导出 \(model.maxConcurrentExports) 本当前列表中已下载齐全、尚未导出的书籍。")
             }
             HStack {
                 Text("显示 \(visibleBooks.count) / \(model.books.count) 本").font(.caption).foregroundStyle(.secondary)

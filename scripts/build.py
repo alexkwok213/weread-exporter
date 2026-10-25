@@ -47,7 +47,7 @@ subprocess.run([str(bundled), '-I', '-B', '-c',
     cwd=app, check=True)
 info = {'CFBundleName': '微信读书导出助手', 'CFBundleDisplayName': '微信读书导出助手',
     'CFBundleExecutable': 'WeReadExporter', 'CFBundleIdentifier': 'io.github.alexkwok213.WeReadExporter',
-    'CFBundleVersion': '11', 'CFBundleShortVersionString': '2.5.0',
+    'CFBundleVersion': '12', 'CFBundleShortVersionString': '2.5.1',
     'CFBundleIconFile': 'AppIcon.icns', 'CFBundlePackageType': 'APPL',
     'LSMinimumSystemVersion': '13.0', 'NSHighResolutionCapable': True,
     'NSPrincipalClass': 'NSApplication',

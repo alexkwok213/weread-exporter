@@ -3,7 +3,10 @@ import Foundation
 @main
 struct LibraryTests {
     @MainActor static func main() async {
-        let model = ExportModel()
+        let suite = "weread-concurrency-tests-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let model = ExportModel(concurrencyPreferences: preferences)
         model.start()
         precondition(model.books.count == 300)
         for category in LibraryFilter.allCases {
@@ -40,14 +43,14 @@ struct LibraryTests {
         precondition(model.books.filter(\.exported).count == 224)
         precondition(model.failures.count == 1 && model.failures["fixture:3"] != nil)
         precondition(model.error.contains("1 本导出失败"))
-        let cancelled = ExportModel(); cancelled.start()
+        let cancelled = ExportModel(concurrencyPreferences: preferences); cancelled.start()
         cancelled.exportBatch(cancelled.books.filter { $0.ready && !$0.exported && cancelled.failures[$0.id] == nil })
         cancelled.stopBatch()
         precondition(cancelled.busy && cancelled.batchRunning)
         cancelled.exportBatch(cancelled.books)
         try? await Task.sleep(nanoseconds: 20_000_000)
         precondition(!cancelled.batchRunning && cancelled.books.filter(\.exported).count == 78)
-        let denied = ExportModel(); denied.start()
+        let denied = ExportModel(concurrencyPreferences: preferences); denied.start()
         denied.fixtureResponse = { _, identity in
             identity == "fixture:3"
                 ? WorkerResponse(ok: false, error: "测试授权失效", kind: "permission")
@@ -56,7 +59,7 @@ struct LibraryTests {
         denied.exportBatch(denied.books.filter { $0.ready && !$0.exported })
         try? await Task.sleep(nanoseconds: 20_000_000)
         precondition(!denied.batchRunning && denied.permissionNeeded && denied.batchCompleted == 3 && !denied.busy)
-        let automatic = ExportModel(); automatic.start(); automatic.auto = true
+        let automatic = ExportModel(concurrencyPreferences: preferences); automatic.start(); automatic.auto = true
         automatic.refresh()
         try? await Task.sleep(nanoseconds: 20_000_000)
         precondition(automatic.batchCompleted == 0, "New cache must stabilize before auto export")
@@ -72,6 +75,31 @@ struct LibraryTests {
         try? await Task.sleep(nanoseconds: 20_000_000)
         precondition(!automatic.batchRunning && automatic.batchCompleted == 150,
                      "Failed books must wait for retry cooldown")
+        let adjustable = ExportModel(concurrencyPreferences: preferences); adjustable.start()
+        precondition(adjustable.maxConcurrentExports == 3)
+        adjustable.maxConcurrentExports = 1
+        adjustable.exportBatch(adjustable.books.filter { $0.ready && !$0.exported })
+        precondition(adjustable.exportingBookIDs.count == 1)
+        adjustable.maxConcurrentExports = 5
+        precondition(adjustable.exportingBookIDs.count == 5, "Raising the limit must immediately fill slots")
+        adjustable.maxConcurrentExports = 2
+        precondition(adjustable.exportingBookIDs.count == 5, "Lowering the limit must not cancel active work")
+        var laterMaximum = 0
+        adjustable.fixtureResponse = { _, identity in
+            laterMaximum = max(laterMaximum, adjustable.exportingBookIDs.count)
+            return WorkerResponse(ok: true, result: ExportResult(title: identity!, epub: "/tmp/fixture.epub"))
+        }
+        for _ in 0..<500 {
+            if !adjustable.batchRunning { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        precondition(!adjustable.busy && adjustable.batchCompleted == 150 && laterMaximum == 2)
+        precondition(ExportModel(concurrencyPreferences: preferences).maxConcurrentExports == 2,
+                     "Concurrency selection must survive reopening the app")
+        adjustable.maxConcurrentExports = 0
+        precondition(adjustable.maxConcurrentExports == 1)
+        adjustable.maxConcurrentExports = 99
+        precondition(adjustable.maxConcurrentExports == 8)
         print("PASS: 300 books, disjoint categories, multi-term search, pending-first sort, 150-item batch with failure, cancellation and permission stop")
     }
 }

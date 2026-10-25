@@ -37,6 +37,22 @@ struct LibraryTests {
         denied.exportBatch(denied.books.filter { $0.ready && !$0.exported })
         try? await Task.sleep(nanoseconds: 20_000_000)
         precondition(!denied.batchRunning && denied.permissionNeeded && denied.batchCompleted == 1)
+        let automatic = ExportModel(); automatic.start(); automatic.auto = true
+        automatic.refresh()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        precondition(automatic.batchCompleted == 0, "New cache must stabilize before auto export")
+        automatic.refresh()
+        for _ in 0..<500 {
+            if !automatic.busy && !automatic.batchRunning { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        precondition(automatic.batchTotal == 150 && automatic.batchCompleted == 150,
+                     "Auto export must drain all stable books in one queue")
+        precondition(automatic.books.filter(\.exported).count == 224)
+        automatic.refresh()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        precondition(!automatic.batchRunning && automatic.batchCompleted == 150,
+                     "Failed books must wait for retry cooldown")
         print("PASS: 300 books, disjoint categories, multi-term search, pending-first sort, 150-item batch with failure, cancellation and permission stop")
     }
 }

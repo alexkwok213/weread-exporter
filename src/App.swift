@@ -200,11 +200,11 @@ final class ExportModel: ObservableObject {
             self.permissionNeeded = false
             self.lastChecked = Date().formatted(date: .omitted, time: .standard)
             self.message = self.books.isEmpty ? "尚未发现本机下载的电子书" : "已识别 \(self.books.count) 本本机缓存的书"
-            let stable = self.books.first { book in
+            let stable = self.books.filter { book in
                 book.ready && !book.exported && self.previous[book.id] == book.fingerprint && (self.retryAfter[book.id] ?? .distantPast) <= Date()
             }
             self.previous = Dictionary(uniqueKeysWithValues: self.books.map { ($0.id, $0.fingerprint) })
-            if self.auto, let book = stable { self.export(book) }
+            if self.auto { self.exportBatch(stable) }
         }
     }
     func export(_ book: Book) {

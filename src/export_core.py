@@ -246,6 +246,30 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
         raise ValueError(str(len(set(misses))) + ' images absent from local cache; '
                          'use --fetch-missing or provide --image-cache')
 
+    # CSS already falls back to list-style-type when a marker image is absent.
+    # Make that fallback explicit so missing decoration cannot block the book.
+    normalized_missing_list_images = 0
+    for stylesheet_name in list(resources):
+        if not stylesheet_name.endswith('.css'):
+            continue
+
+        def list_marker_fallback(match):
+            nonlocal normalized_missing_list_images
+            if not match.group('property'):
+                return match[0]
+            parsed = urllib.parse.urlsplit(match.group('link'))
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(stylesheet_name),
+                                                       urllib.parse.unquote(parsed.path)))
+            if parsed.scheme or parsed.netloc or not parsed.path or target in resources:
+                return match[0]
+            normalized_missing_list_images += 1
+            return match.group('property') + 'none'
+
+        css = resources[stylesheet_name].decode('utf-8')
+        css = re.sub(r"""/\*[\s\S]*?\*/|(?P<property>(?<![\w-])list-style-image\s*:\s*)url\(\s*["']?(?P<link>[^)"']+?)["']?\s*\)""",
+                     list_marker_fallback, css, flags=re.IGNORECASE)
+        resources[stylesheet_name] = css.encode('utf-8')
+
     nav = ET.Element('{' + XHTML + '}html', {'lang': 'zh-CN'})
     head = ET.SubElement(nav, '{' + XHTML + '}head')
     ET.SubElement(head, '{' + XHTML + '}title').text = metadata['title'] + '目录'
@@ -377,4 +401,5 @@ def export_book(book_id, root, output, cache, fetch_missing=False):
             'embedded_images': sum(t.startswith('image/') for t in media.values()),
             'missing_images': 0, 'source_files_verified_unchanged': len(hashes),
             'normalized_duplicate_attributes': normalized_attributes,
+            'normalized_missing_list_images': normalized_missing_list_images,
             'epub_sha256': hashlib.sha256(filename.read_bytes()).hexdigest()}

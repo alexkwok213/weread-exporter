@@ -9,6 +9,15 @@
 
 这是一个非官方 macOS 工具。SwiftUI 提供书籍列表，Python 标准库负责读取缓存和生成 EPUB。不需要 AI API、账号密码或登录凭据。
 
+## 下载安装
+
+DMG 支持 **Apple Silicon（M 系列）和 macOS 13 或更新版本**。应用内置 Python，无需安装 Xcode 或单独安装 Python。
+
+1. 在最新版发布页的 **Assets** 中下载并打开以 `macOS-arm64.dmg` 结尾的文件。[GitHub Releases](https://github.com/alexkwok213/weread-exporter/releases/latest)
+2. 将「微信读书导出助手」拖入「应用程序」，再从「应用程序」打开。
+3. 当前安装包尚未经过 Apple 公证。若首次打开被拦截，请确认安装包来自本项目的发布页，再到「系统设置 → 隐私与安全性」选择「仍要打开」。[Apple 官方说明](https://support.apple.com/zh-cn/102445)
+4. 在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」添加此应用，退出并重新打开，点击「刷新书籍」。
+
 ## 能做什么
 
 - 自动发现本机缓存，显示下载是否完整、导出结果和失败原因；源缓存被移除后，仍保留有本地 EPUB 文件的历史导出记录。
@@ -65,7 +74,7 @@ python3 scripts/build.py --python-runtime /path/to/standalone/python
 
 “同时导出”选项会自动保存。任务处理中调高上限会立即补入任务；调低上限不会中断已开始的导出，后续按新上限运行。
 
-本项目目前提供源码构建流程，没有 Apple 公证安装包。**重新构建或重新签名后，macOS 可能要求移除旧授权条目再重新添加。** 请避免同时运行多个同名副本。
+**重新构建或重新签名后，macOS 可能要求移除旧授权条目再重新添加。** 请避免同时运行多个同名副本。
 
 ## 常见情况
 

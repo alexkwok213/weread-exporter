@@ -9,6 +9,14 @@
 
 这是一个非官方 macOS 工具。SwiftUI 提供书籍列表，Python 标准库负责读取缓存和生成 EPUB。不需要 AI API、账号密码或登录凭据。
 
+## 使用演示
+
+[下载 45 秒中文演示视频（MP4）](https://github.com/alexkwok213/weread-exporter/releases/download/v2.5.2/WeReadExporter-2.5.2-demo-zh.mp4)
+
+1. 在 Mac 版微信读书中打开一本书，点阅读界面右上角的「···」，确认菜单里显示「下载完成」。
+2. 打开导出助手，点击「刷新书籍」。开启「自动导出」后，助手会处理已下载完整的书籍。也可以点书名所在行的「导出」。
+3. 在助手里搜索书名。状态变成「已导出」后，点击该行的「查看文件」，即可在访达中找到对应的 EPUB。
+
 ## 下载安装
 
 DMG 支持 **Apple Silicon（M 系列）和 macOS 13 或更新版本**。应用内置 Python，无需安装 Xcode 或单独安装 Python。

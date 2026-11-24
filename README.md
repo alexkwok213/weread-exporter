@@ -11,7 +11,7 @@
 
 ## 使用演示
 
-[下载 45 秒中文演示视频（MP4）](https://github.com/alexkwok213/weread-exporter/releases/download/v2.5.2/WeReadExporter-2.5.2-demo-zh.mp4)
+https://github.com/user-attachments/assets/086f5e96-04a0-4063-ba92-38f88f89d987
 
 1. 在 Mac 版微信读书中打开一本书，点阅读界面右上角的「···」，确认菜单里显示「下载完成」。
 2. 打开导出助手，点击「刷新书籍」。开启「自动导出」后，助手会处理已下载完整的书籍。也可以点书名所在行的「导出」。
